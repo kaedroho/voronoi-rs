@@ -5,3 +5,4 @@ authors = ["Karl Hobley <karl@kaed.uk>"]
 
 [dependencies]
 cgmath = "0.14"
+fnv = "1.0"
