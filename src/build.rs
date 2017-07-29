@@ -1,15 +1,15 @@
-use std::collections::{BinaryHeap, BTreeSet};
+use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 
-use cgmath::{Point2, Vector2};
+use cgmath::{Point2, Vector2, MetricSpace};
 use fnv::{FnvHashMap, FnvHashSet};
 
 use diagram::Diagram;
 
 #[derive(Debug)]
 pub struct Rect {
-    position: Point2<f32>,
-    size: Vector2<f32>,
+    pub position: Point2<f32>,
+    pub size: Vector2<f32>,
 }
 
 #[derive(Debug)]
@@ -37,7 +37,9 @@ impl Eq for Event {}
 
 impl PartialOrd for Event {
     fn partial_cmp(&self, other: &Event) -> Option<Ordering> {
-        self.get_y().partial_cmp(&other.get_y())
+        let y = -self.get_y();
+        let other_y = -other.get_y();
+        y.partial_cmp(&other_y)
     }
 }
 
@@ -47,6 +49,23 @@ impl Ord for Event {
     }
 }
 
+fn circumcircle_of_points(a: Point2<f32>, b: Point2<f32>, c: Point2<f32>) -> (Point2<f32>, f32) {
+    // http://en.wikipedia.org/wiki/Circumscribed_circle#Cartesian_coordinates
+    let d = 2.0 * (a.x * (b.y - c.y)
+                + b.x * (c.y - a.y)
+                + c.x * (a.y - b.y));
+
+    let axy2 = a.x * a.x + a.y * a.y;
+    let bxy2 = b.x * b.x + b.y * b.y;
+    let cxy2 = c.x * c.x + c.y * c.y;
+
+    let x = axy2 * (b.y - c.y) + bxy2 * (c.y - a.y) + cxy2 * (a.y - b.y);
+    let y = axy2 * (c.x - b.x) + bxy2 * (a.x - c.x) + cxy2 * (b.x - a.x);
+
+    let centroid = Point2::new(x / d, y / d);
+    let radius = a.distance(centroid);
+    (centroid, radius)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ArcId(u32);
@@ -130,20 +149,37 @@ impl BeachLine {
 
         // Insert new arc
         self.arcs.insert(arc_id, arc);
+
         arc_id
     }
 
     pub fn find_arc(&self, x: f32) -> Option<ArcId> {
-        None
+        unimplemented!()
+    }
+
+    pub fn get_circumcircle(&self, middle_arc_id: ArcId) -> Option<(Point2<f32>, f32)> {
+        let mut middle_arc = self.arcs.get(&middle_arc_id).unwrap();
+        let (left_arc_id, right_arc_id) = match (middle_arc.left, middle_arc.right) {
+            (Some(left_arc_id), Some(right_arc_id)) => (left_arc_id, right_arc_id),
+            _ => return None
+        };
+
+        let left_arc = self.arcs.get(&left_arc_id).unwrap();
+        let right_arc = self.arcs.get(&right_arc_id).unwrap();
+
+        Some(circumcircle_of_points(left_arc.origin, middle_arc.origin, right_arc.origin))
+    }
+
+    pub fn remove_arc(&mut self, arc: ArcId) {
+
     }
 }
 
 #[derive(Debug)]
-struct DiagramBuilder {
+pub struct DiagramBuilder {
     diagram: Diagram,
     event_queue: BinaryHeap<Event>,
     beachline: BeachLine,
-    next_circle_event_id: u32,
 
     /// Keeps track of valid future circle events
     future_circle_events: FnvHashSet<ArcId>,
@@ -168,7 +204,6 @@ impl DiagramBuilder {
             diagram: Diagram::default(),
             beachline: BeachLine::default(),
             event_queue: event_queue,
-            next_circle_event_id: 0,
             future_circle_events: FnvHashSet::default(),
         }
     }
@@ -180,14 +215,26 @@ impl DiagramBuilder {
         // Insert arc for this site
         let new_arc = self.beachline.add_arc(site, current_arc);
 
-        // Cancel circle event for existing arc if it has one
         if let Some(current_arc) = current_arc {
+            // Cancel existing circle event if one exists
             self.future_circle_events.remove(&current_arc);
+
+            // Add new circle event
+            if let Some((centroid, radius)) = self.beachline.get_circumcircle(current_arc) {
+                // Add to event_queue
+                self.event_queue.push(Event::Circle(centroid.y + radius, centroid, current_arc));
+
+                // Add to future_circle_events set
+                // This allows us to remove the event at any time before processing,
+                // which is difficult to do with just the event queue.
+                self.future_circle_events.insert(current_arc);
+            }
         }
     }
 
     fn handle_circle_event(&mut self, y: f32, centroid: Point2<f32>, arc: ArcId) {
-
+        // Remove the arc
+        self.beachline.remove_arc(arc);
     }
 
     pub fn step(&mut self) -> bool {
