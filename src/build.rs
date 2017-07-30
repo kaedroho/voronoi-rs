@@ -261,6 +261,16 @@ impl BeachLine {
         // Remove arc from ordering
         self.arc_ordering.retain(|a| *a != arc_id)
     }
+
+    pub fn debug(&self, directrix: f32) {
+        for arc_id in &self.arc_ordering {
+            let xl = self.get_left_breakpoint(*arc_id, directrix);
+            let xr = self.get_right_breakpoint(*arc_id, directrix);
+            let origin = self.arcs.get(arc_id).unwrap().origin;
+
+            println!("arc {}: xl={}, xr={}, site={{x:{}, y:{}}}", arc_id.0, xl, xr, origin.x, origin.y);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -268,6 +278,10 @@ pub struct DiagramBuilder {
     diagram: Diagram,
     event_queue: BinaryHeap<Event>,
     beachline: BeachLine,
+    step: u32,
+    total_events: u32,
+    cancelled_events: u32,
+    debug: bool,
 
     /// Keeps track of valid future circle events
     future_circle_events: FnvHashSet<ArcId>,
@@ -291,9 +305,17 @@ impl DiagramBuilder {
         DiagramBuilder {
             diagram: Diagram::default(),
             beachline: BeachLine::default(),
+            step: 0,
+            total_events: 0,
+            cancelled_events: 0,
+            debug: false,
             event_queue: event_queue,
             future_circle_events: FnvHashSet::default(),
         }
+    }
+
+    pub fn set_debug(&mut self, enable: bool) {
+        self.debug = enable;
     }
 
     fn handle_site_event(&mut self, site: Point2<f32>) {
@@ -305,13 +327,20 @@ impl DiagramBuilder {
 
         if let Some(current_arc) = current_arc {
             // Cancel existing circle event if one exists
-            self.future_circle_events.remove(&current_arc);
+            if self.future_circle_events.remove(&current_arc) {
+                self.cancelled_events += 1;
+            }
         }
 
         let (left_arc, right_arc) = self.beachline.get_left_right_arcs(new_arc);
 
         // Check for circle event on the left
         if let Some(left_arc) = left_arc {
+            // Cancel existing circle event if one exists
+            if self.future_circle_events.remove(&left_arc) {
+                self.cancelled_events += 1;
+            }
+
             if let Some((centroid, radius)) = self.beachline.get_circumcircle(left_arc) {
                 if centroid.y + radius > site.y {
                     // Add to event_queue
@@ -321,12 +350,18 @@ impl DiagramBuilder {
                     // This allows us to remove the event at any time before processing,
                     // which is difficult to do with just the event queue.
                     self.future_circle_events.insert(left_arc);
+                    self.total_events += 1;
                 }
             }
         }
 
         // Check for circle event on the right
         if let Some(right_arc) = right_arc {
+            // Cancel existing circle event if one exists
+            if self.future_circle_events.remove(&right_arc) {
+                self.cancelled_events += 1;
+            }
+
             if let Some((centroid, radius)) = self.beachline.get_circumcircle(right_arc) {
                 if centroid.y + radius > site.y {
                     // Add to event_queue
@@ -336,6 +371,7 @@ impl DiagramBuilder {
                     // This allows us to remove the event at any time before processing,
                     // which is difficult to do with just the event queue.
                     self.future_circle_events.insert(right_arc);
+                    self.total_events += 1;
                 }
             }
         }
@@ -346,20 +382,54 @@ impl DiagramBuilder {
         self.beachline.remove_arc(arc);
     }
 
+    pub fn debug_beachline(&self, directrix: f32) {
+        self.beachline.debug(directrix);
+    }
+
     pub fn step(&mut self) -> bool {
+        self.step += 1;
+
+        if self.debug {
+            println!("step {}", self.step);
+        }
+
         let event = self.event_queue.pop();
 
         match event {
             Some(Event::Site(p)) => {
                 self.handle_site_event(p);
+
+                if self.debug {
+                    println!("directrix={}", p.y);
+                    println!("site event: x={}, y={}", p.x, p.y);
+                    self.debug_beachline(p.y);
+                }
             }
             Some(Event::Circle(y, centroid, id)) => {
                 // Only run handle_circle_event if the ID is still in future_circle_events
                 if self.future_circle_events.remove(&id) {
                     self.handle_circle_event(y, centroid, id);
+
+                    if self.debug {
+                        println!("directrix={}", y);
+                        println!("circle event: arc={}, cx={}, cy={}", id.0, centroid.x, centroid.y);
+                        self.debug_beachline(y);
+                    }
+                } else {
+                    if self.debug {
+                        println!("directrix={}", y);
+                        println!("cancelled circle event (skipping)");
+                    }
                 }
             }
             None => return true,
+        }
+
+        if self.debug {
+            println!("total_events={}, cancelled_events={}", self.total_events, self.cancelled_events);
+
+            println!("end step");
+            println!("");
         }
 
         false
