@@ -1,5 +1,6 @@
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::f32::INFINITY;
 
 use cgmath::{Point2, Vector2, MetricSpace};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -64,9 +65,98 @@ fn circumcircle_of_points(a: Point2<f32>, b: Point2<f32>, c: Point2<f32>) -> (Po
 
     let centroid = Point2::new(x / d, y / d);
     let radius = a.distance(centroid);
+
     (centroid, radius)
 }
 
+fn intersection(left_focus: Point2<f32>, right_focus: Point2<f32>, directrix: f32) -> Point2<f32> {
+    // Based on intersection function from https://www.cs.hmc.edu/~mbrubeck/voronoi.html
+    let mut p = &left_focus;
+
+    let x = if left_focus.y == right_focus.y {
+        // Focii are at the same height so breakpoint is in the middle
+        (left_focus.x + right_focus.x) / 2.0
+    } else if right_focus.y == directrix {
+        // Right focus is on the directrix
+        right_focus.x
+    } else if left_focus.y == directrix {
+        // Left focus is on the directrix
+        p = &right_focus;
+        left_focus.x
+    } else {
+        // Use the quadratic formula
+        let z0 = 2.0 * (left_focus.y - directrix);
+        let z1 = 2.0 * (right_focus.y - directrix);
+
+        let a = 1.0 / z0 - 1.0 / z1;
+        let b = -2.0 * (left_focus.x / z0 - right_focus.x / z0);
+        let c = (left_focus.x * left_focus.x + left_focus.y * left_focus.y - directrix * directrix) / z0
+                - (right_focus.x * right_focus.x + right_focus.y * right_focus.y - directrix * directrix) / z1;
+
+        (-b - (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
+    };
+
+    // Plug back into one of the parabola equations.
+    let y = (p.y * p.y + (p.x - x) * (p.x - x) - directrix * directrix) / (2.0 * p.y - 2.0 * directrix);
+
+    Point2::new(x, y)
+}
+
+/*
+point intersection(point p0, point p1, double l)
+{
+   point res, p = p0;
+
+   if (p0.x == p1.x)
+      res.y = (p0.y + p1.y) / 2;
+   else if (p1.x == l)
+      res.y = p1.y;
+   else if (p0.x == l) {
+      res.y = p0.y;
+      p = p1;
+   } else {
+      // Use the quadratic formula.
+      double z0 = 2*(p0.x - l);
+      double z1 = 2*(p1.x - l);
+
+      double a = 1/z0 - 1/z1;
+      double b = -2*(p0.y/z0 - p1.y/z1);
+      double c = (p0.y*p0.y + p0.x*p0.x - l*l)/z0
+               - (p1.y*p1.y + p1.x*p1.x - l*l)/z1;
+
+      res.y = ( -b - sqrt(b*b - 4*a*c) ) / (2*a);
+   }
+   // Plug back into one of the parabola equations.
+   res.x = (p.x*p.x + (p.y-res.y)*(p.y-res.y) - l*l)/(2*p.x-2*l);
+   return res;
+}
+
+
+
+
+	site = lSection->data.site->p;
+	double lfocx = site.x;
+	double lfocy = site.y;
+	double plby2 = lfocy - directrix;
+	if (plby2 == 0) {
+		// parabola in degenerate case where focus is on directrix
+		return lfocx;
+	}
+
+	double hl = lfocx - rfocx;
+	double aby2 = (1 / pby2) - (1 / plby2);
+	double b = hl / plby2;
+	if (aby2 != 0) {
+		return (-b + sqrt(b*b - 2 * aby2*(hl*hl / (-2 * plby2) - lfocy + plby2 / 2 + rfocy - pby2 / 2))) / aby2 + rfocx;
+	}
+
+	// if we get here, the two parabolas have the same
+	// distance to the directrix, so the break point is midway
+	return (rfocx + lfocx) / 2;
+
+
+}
+*/
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ArcId(u32);
 
@@ -86,8 +176,8 @@ impl ArcData {
         }
     }
 
-    fn get_y(&self, k: f32, x: f32) -> f32 {
-        1.0 / (2.0 * (self.origin.y - k)) * (x - self.origin.x).powi(2) + (self.origin.y + k) / 2.0
+    fn get_y(&self, directrix: f32, x: f32) -> f32 {
+        1.0 / (2.0 * (self.origin.y - directrix)) * (x - self.origin.x).powi(2) + (self.origin.y + directrix) / 2.0
     }
 }
 
@@ -153,8 +243,29 @@ impl BeachLine {
         arc_id
     }
 
-    pub fn find_arc(&self, x: f32) -> Option<ArcId> {
-        unimplemented!()
+    pub fn get_left_right_arcs(&self, arc_id: ArcId) -> (Option<ArcId>, Option<ArcId>) {
+        let arc = self.arcs.get(&arc_id).unwrap();
+        (arc.left, arc.right)
+    }
+
+    pub fn get_left_breakpoint(&self, arc_id: ArcId, directrix: f32) -> f32 {
+        let right_arc = self.arcs.get(&arc_id).unwrap();
+        let left_arc = match right_arc.left {
+            Some(left_arc_id) => self.arcs.get(&left_arc_id).unwrap(),
+            None => return -INFINITY,
+        };
+
+        intersection(left_arc.origin, right_arc.origin, directrix).x
+    }
+
+    pub fn get_right_breakpoint(&self, arc_id: ArcId, directrix: f32) -> f32 {
+        let left_arc = self.arcs.get(&arc_id).unwrap();
+        let right_arc = match left_arc.right {
+            Some(right_arc_id) => self.arcs.get(&right_arc_id).unwrap(),
+            None => return -INFINITY,
+        };
+
+        intersection(left_arc.origin, right_arc.origin, directrix).x
     }
 
     pub fn get_circumcircle(&self, middle_arc_id: ArcId) -> Option<(Point2<f32>, f32)> {
@@ -170,8 +281,40 @@ impl BeachLine {
         Some(circumcircle_of_points(left_arc.origin, middle_arc.origin, right_arc.origin))
     }
 
-    pub fn remove_arc(&mut self, arc: ArcId) {
+    pub fn find_arc(&self, x: f32, directrix: f32) -> Option<ArcId> {
+        let mut current_arc = None;
 
+        for arc_id in &self.arc_ordering {
+            if self.get_left_breakpoint(*arc_id, directrix) > x {
+                break;
+            }
+
+            current_arc = Some(*arc_id);
+        }
+
+        current_arc
+    }
+
+    pub fn remove_arc(&mut self, arc_id: ArcId) {
+        // Link left and right arcs together
+        let (left_arc_id, right_arc_id) = {
+            let arc = self.arcs.get(&arc_id).unwrap();
+            (arc.left, arc.right)
+        };
+        if let Some(left_arc_id) = left_arc_id {
+            let mut left_arc = self.arcs.get_mut(&left_arc_id).unwrap();
+            left_arc.right = right_arc_id;
+        }
+        if let Some(right_arc_id) = right_arc_id {
+            let mut right_arc = self.arcs.get_mut(&right_arc_id).unwrap();
+            right_arc.left = left_arc_id;
+        }
+
+        // Remove arc data
+        self.arcs.remove(&arc_id);
+
+        // Remove arc from ordering
+        self.arc_ordering.retain(|a| *a != arc_id)
     }
 }
 
@@ -210,7 +353,7 @@ impl DiagramBuilder {
 
     fn handle_site_event(&mut self, site: Point2<f32>) {
         // Find existing arc directly above this site
-        let current_arc = self.beachline.find_arc(site.x);
+        let current_arc = self.beachline.find_arc(site.x, site.y);
 
         // Insert arc for this site
         let new_arc = self.beachline.add_arc(site, current_arc);
@@ -218,16 +361,33 @@ impl DiagramBuilder {
         if let Some(current_arc) = current_arc {
             // Cancel existing circle event if one exists
             self.future_circle_events.remove(&current_arc);
+        }
 
-            // Add new circle event
-            if let Some((centroid, radius)) = self.beachline.get_circumcircle(current_arc) {
+        let (left_arc, right_arc) = self.beachline.get_left_right_arcs(new_arc);
+
+        // Check for circle event on the left
+        if let Some(left_arc) = left_arc {
+            if let Some((centroid, radius)) = self.beachline.get_circumcircle(left_arc) {
                 // Add to event_queue
-                self.event_queue.push(Event::Circle(centroid.y + radius, centroid, current_arc));
+                self.event_queue.push(Event::Circle(centroid.y + radius, centroid, left_arc));
 
                 // Add to future_circle_events set
                 // This allows us to remove the event at any time before processing,
                 // which is difficult to do with just the event queue.
-                self.future_circle_events.insert(current_arc);
+                self.future_circle_events.insert(left_arc);
+            }
+        }
+
+        // Check for circle event on the right
+        if let Some(right_arc) = right_arc {
+            if let Some((centroid, radius)) = self.beachline.get_circumcircle(right_arc) {
+                // Add to event_queue
+                self.event_queue.push(Event::Circle(centroid.y + radius, centroid, right_arc));
+
+                // Add to future_circle_events set
+                // This allows us to remove the event at any time before processing,
+                // which is difficult to do with just the event queue.
+                self.future_circle_events.insert(right_arc);
             }
         }
     }
