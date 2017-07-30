@@ -89,18 +89,18 @@ fn intersection(left_focus: Point2<f32>, right_focus: Point2<f32>, directrix: f3
         left_focus.x
     } else {
         // Use the quadratic formula
-        let z0 = 2.0 * (left_focus.y - directrix);
-        let z1 = 2.0 * (right_focus.y - directrix);
+        let z_left = 2.0 * (left_focus.y - directrix);
+        let z_right = 2.0 * (right_focus.y - directrix);
 
-        let a = 1.0 / z0 - 1.0 / z1;
-        let b = -2.0 * (left_focus.x / z0 - right_focus.x / z0);
-        let c = (left_focus.x * left_focus.x + left_focus.y * left_focus.y - directrix * directrix) / z0
-                - (right_focus.x * right_focus.x + right_focus.y * right_focus.y - directrix * directrix) / z1;
+        let a = 1.0 / z_left - 1.0 / z_right;
+        let b = -2.0 * (left_focus.x / z_left - right_focus.x / z_right);
+        let c = (left_focus.x * left_focus.x + left_focus.y * left_focus.y - directrix * directrix) / z_left
+                - (right_focus.x * right_focus.x + right_focus.y * right_focus.y - directrix * directrix) / z_right;
 
-        (-b - (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
+        (-b - (b * b - 4.0 * a * c).abs().sqrt()) / (2.0 * a)
     };
 
-    // Plug back into one of the parabola equations.
+    // Plug back into one of the parabola equations
     let y = (p.y * p.y + (p.x - x) * (p.x - x) - directrix * directrix) / (2.0 * p.y - 2.0 * directrix);
 
     Point2::new(x, y)
@@ -123,10 +123,6 @@ impl ArcData {
             left: None,
             right: None,
         }
-    }
-
-    fn get_y(&self, directrix: f32, x: f32) -> f32 {
-        1.0 / (2.0 * (self.origin.y - directrix)) * (x - self.origin.x).powi(2) + (self.origin.y + directrix) / 2.0
     }
 }
 
@@ -211,14 +207,14 @@ impl BeachLine {
         let left_arc = self.arcs.get(&arc_id).unwrap();
         let right_arc = match left_arc.right {
             Some(right_arc_id) => self.arcs.get(&right_arc_id).unwrap(),
-            None => return -INFINITY,
+            None => return INFINITY,
         };
 
         intersection(left_arc.origin, right_arc.origin, directrix).x
     }
 
     pub fn get_circumcircle(&self, middle_arc_id: ArcId) -> Option<(Point2<f32>, f32)> {
-        let mut middle_arc = self.arcs.get(&middle_arc_id).unwrap();
+        let middle_arc = self.arcs.get(&middle_arc_id).unwrap();
         let (left_arc_id, right_arc_id) = match (middle_arc.left, middle_arc.right) {
             (Some(left_arc_id), Some(right_arc_id)) => (left_arc_id, right_arc_id),
             _ => return None
