@@ -50,11 +50,15 @@ impl Ord for Event {
     }
 }
 
-fn circumcircle_of_points(a: Point2<f32>, b: Point2<f32>, c: Point2<f32>) -> (Point2<f32>, f32) {
+fn circumcircle_of_points(a: Point2<f32>, b: Point2<f32>, c: Point2<f32>) -> Option<(Point2<f32>, f32)> {
     // http://en.wikipedia.org/wiki/Circumscribed_circle#Cartesian_coordinates
     let d = 2.0 * (a.x * (b.y - c.y)
                 + b.x * (c.y - a.y)
                 + c.x * (a.y - b.y));
+
+    if d == 0.0 {
+        return None;
+    }
 
     let axy2 = a.x * a.x + a.y * a.y;
     let bxy2 = b.x * b.x + b.y * b.y;
@@ -66,7 +70,7 @@ fn circumcircle_of_points(a: Point2<f32>, b: Point2<f32>, c: Point2<f32>) -> (Po
     let centroid = Point2::new(x / d, y / d);
     let radius = a.distance(centroid);
 
-    (centroid, radius)
+    Some((centroid, radius))
 }
 
 fn intersection(left_focus: Point2<f32>, right_focus: Point2<f32>, directrix: f32) -> Point2<f32> {
@@ -102,61 +106,6 @@ fn intersection(left_focus: Point2<f32>, right_focus: Point2<f32>, directrix: f3
     Point2::new(x, y)
 }
 
-/*
-point intersection(point p0, point p1, double l)
-{
-   point res, p = p0;
-
-   if (p0.x == p1.x)
-      res.y = (p0.y + p1.y) / 2;
-   else if (p1.x == l)
-      res.y = p1.y;
-   else if (p0.x == l) {
-      res.y = p0.y;
-      p = p1;
-   } else {
-      // Use the quadratic formula.
-      double z0 = 2*(p0.x - l);
-      double z1 = 2*(p1.x - l);
-
-      double a = 1/z0 - 1/z1;
-      double b = -2*(p0.y/z0 - p1.y/z1);
-      double c = (p0.y*p0.y + p0.x*p0.x - l*l)/z0
-               - (p1.y*p1.y + p1.x*p1.x - l*l)/z1;
-
-      res.y = ( -b - sqrt(b*b - 4*a*c) ) / (2*a);
-   }
-   // Plug back into one of the parabola equations.
-   res.x = (p.x*p.x + (p.y-res.y)*(p.y-res.y) - l*l)/(2*p.x-2*l);
-   return res;
-}
-
-
-
-
-	site = lSection->data.site->p;
-	double lfocx = site.x;
-	double lfocy = site.y;
-	double plby2 = lfocy - directrix;
-	if (plby2 == 0) {
-		// parabola in degenerate case where focus is on directrix
-		return lfocx;
-	}
-
-	double hl = lfocx - rfocx;
-	double aby2 = (1 / pby2) - (1 / plby2);
-	double b = hl / plby2;
-	if (aby2 != 0) {
-		return (-b + sqrt(b*b - 2 * aby2*(hl*hl / (-2 * plby2) - lfocy + plby2 / 2 + rfocy - pby2 / 2))) / aby2 + rfocx;
-	}
-
-	// if we get here, the two parabolas have the same
-	// distance to the directrix, so the break point is midway
-	return (rfocx + lfocx) / 2;
-
-
-}
-*/
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ArcId(u32);
 
@@ -278,7 +227,7 @@ impl BeachLine {
         let left_arc = self.arcs.get(&left_arc_id).unwrap();
         let right_arc = self.arcs.get(&right_arc_id).unwrap();
 
-        Some(circumcircle_of_points(left_arc.origin, middle_arc.origin, right_arc.origin))
+        circumcircle_of_points(left_arc.origin, middle_arc.origin, right_arc.origin)
     }
 
     pub fn find_arc(&self, x: f32, directrix: f32) -> Option<ArcId> {
@@ -368,26 +317,30 @@ impl DiagramBuilder {
         // Check for circle event on the left
         if let Some(left_arc) = left_arc {
             if let Some((centroid, radius)) = self.beachline.get_circumcircle(left_arc) {
-                // Add to event_queue
-                self.event_queue.push(Event::Circle(centroid.y + radius, centroid, left_arc));
+                if centroid.y + radius > site.y {
+                    // Add to event_queue
+                    self.event_queue.push(Event::Circle(centroid.y + radius, centroid, left_arc));
 
-                // Add to future_circle_events set
-                // This allows us to remove the event at any time before processing,
-                // which is difficult to do with just the event queue.
-                self.future_circle_events.insert(left_arc);
+                    // Add to future_circle_events set
+                    // This allows us to remove the event at any time before processing,
+                    // which is difficult to do with just the event queue.
+                    self.future_circle_events.insert(left_arc);
+                }
             }
         }
 
         // Check for circle event on the right
         if let Some(right_arc) = right_arc {
             if let Some((centroid, radius)) = self.beachline.get_circumcircle(right_arc) {
-                // Add to event_queue
-                self.event_queue.push(Event::Circle(centroid.y + radius, centroid, right_arc));
+                if centroid.y + radius > site.y {
+                    // Add to event_queue
+                    self.event_queue.push(Event::Circle(centroid.y + radius, centroid, right_arc));
 
-                // Add to future_circle_events set
-                // This allows us to remove the event at any time before processing,
-                // which is difficult to do with just the event queue.
-                self.future_circle_events.insert(right_arc);
+                    // Add to future_circle_events set
+                    // This allows us to remove the event at any time before processing,
+                    // which is difficult to do with just the event queue.
+                    self.future_circle_events.insert(right_arc);
+                }
             }
         }
     }
