@@ -4,7 +4,7 @@ use cgmath::Point2;
 pub struct VertexId(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct HalfEdgeId(u32);
+pub struct HalfEdgeId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(u32);

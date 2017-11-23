@@ -5,7 +5,7 @@ use std::f32::INFINITY;
 use cgmath::{Point2, Vector2, MetricSpace};
 use fnv::{FnvHashMap, FnvHashSet};
 
-use diagram::Diagram;
+use diagram::{Diagram, Vertex, HalfEdgeId};
 
 #[derive(Debug)]
 pub struct Rect {
@@ -282,6 +282,8 @@ pub struct DiagramBuilder {
     total_events: u32,
     cancelled_events: u32,
     debug: bool,
+    offset: Point2<f32>,
+    scale: Vector2<f32>,
 
     /// Keeps track of valid future circle events
     future_circle_events: FnvHashSet<ArcId>,
@@ -311,6 +313,8 @@ impl DiagramBuilder {
             debug: false,
             event_queue: event_queue,
             future_circle_events: FnvHashSet::default(),
+            offset: bounding_rect.position,
+            scale: 1.0 / bounding_rect.size,
         }
     }
 
@@ -380,9 +384,20 @@ impl DiagramBuilder {
     fn handle_circle_event(&mut self, y: f32, centroid: Point2<f32>, arc: ArcId) {
         // Remove the arc
         self.beachline.remove_arc(arc);
+
+        // Add vertex into diagram
+        self.diagram.vertices.push(
+            Vertex {
+                coordinates: Point2::new(
+                    centroid.x / self.scale.x + self.offset.x,
+                    centroid.y / self.scale.y + self.offset.y,
+                ),
+                incident_edge: HalfEdgeId(0),
+            }
+        );
     }
 
-    pub fn debug_beachline(&self, directrix: f32) {
+    fn debug_beachline(&self, directrix: f32) {
         self.beachline.debug(directrix);
     }
 
