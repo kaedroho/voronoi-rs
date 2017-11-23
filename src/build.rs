@@ -400,9 +400,6 @@ impl DiagramBuilder {
     }
 
     fn handle_circle_event(&mut self, y: f32, centroid: Point2<f32>, arc: ArcId) {
-        // Remove the arc
-        self.beachline.remove_arc(arc);
-
         // Add vertex into diagram
         self.diagram.vertices.push(
             Vertex {
@@ -413,6 +410,9 @@ impl DiagramBuilder {
                 incident_edge: HalfEdgeId(0),
             }
         );
+
+        // Remove the arc
+        self.beachline.remove_arc(arc);
     }
 
     fn debug_beachline(&self, directrix: f32) {
