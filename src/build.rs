@@ -13,16 +13,31 @@ pub struct Rect {
     pub size: Vector2<f32>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Site {
+    pub id: u32,
+    pub position: Point2<f32>,
+}
+
+impl Site {
+    pub fn new(id: u32, position: Point2<f32>) -> Site {
+        Site {
+            id: id,
+            position: position,
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Event {
-    Site(Point2<f32>),
+    Site(Site),
     Circle(f32, Point2<f32>, ArcId),
 }
 
 impl Event {
     fn get_y(&self) -> f32 {
         match *self {
-            Event::Site(p) => p.y,
+            Event::Site(site) => site.position.y,
             Event::Circle(y, ..) => y,
         }
     }
@@ -110,16 +125,16 @@ fn intersection(left_focus: Point2<f32>, right_focus: Point2<f32>, directrix: f3
 struct ArcId(u32);
 
 #[derive(Debug)]
-struct ArcData {
-    pub origin: Point2<f32>,
+struct Arc {
+    pub site: Site,
     pub left: Option<ArcId>,
     pub right: Option<ArcId>,
 }
 
-impl ArcData {
-    fn from_point(p: Point2<f32>) -> ArcData {
-        ArcData {
-            origin: p,
+impl Arc {
+    fn from_site(site: Site) -> Arc {
+        Arc {
+            site: site,
             left: None,
             right: None,
         }
@@ -129,7 +144,7 @@ impl ArcData {
 #[derive(Debug, Default)]
 struct BeachLine {
     next_arc_id: u32,
-    arcs: FnvHashMap<ArcId, ArcData>,
+    arcs: FnvHashMap<ArcId, Arc>,
     arc_ordering: Vec<ArcId>,  // TODO: RBTree
 }
 
@@ -140,10 +155,10 @@ impl BeachLine {
         arc_id
     }
 
-    pub fn add_arc(&mut self, site: Point2<f32>, current_arc_id: Option<ArcId>) -> ArcId {
+    pub fn add_arc(&mut self, site: Site, current_arc_id: Option<ArcId>) -> ArcId {
         // Create new arc
         let arc_id = self.new_arc_id();
-        let mut arc = ArcData::from_point(site);
+        let mut arc = Arc::from_site(site);
 
         // If there's an existing arc, split it in two
         if let Some(current_arc_id) = current_arc_id {
@@ -152,7 +167,7 @@ impl BeachLine {
             let right_arc = {
                 let current_arc = self.arcs.get(&current_arc_id).unwrap();
 
-                let mut right_arc = ArcData::from_point(current_arc.origin);
+                let mut right_arc = Arc::from_site(current_arc.site);
                 arc.right = Some(right_arc_id);
                 right_arc.left = Some(arc_id);
                 right_arc.right = current_arc.right;
@@ -200,7 +215,7 @@ impl BeachLine {
             None => return -INFINITY,
         };
 
-        intersection(left_arc.origin, right_arc.origin, directrix).x
+        intersection(left_arc.site.position, right_arc.site.position, directrix).x
     }
 
     pub fn get_right_breakpoint(&self, arc_id: ArcId, directrix: f32) -> f32 {
@@ -210,7 +225,7 @@ impl BeachLine {
             None => return INFINITY,
         };
 
-        intersection(left_arc.origin, right_arc.origin, directrix).x
+        intersection(left_arc.site.position, right_arc.site.position, directrix).x
     }
 
     pub fn get_circumcircle(&self, middle_arc_id: ArcId) -> Option<(Point2<f32>, f32)> {
@@ -223,7 +238,7 @@ impl BeachLine {
         let left_arc = self.arcs.get(&left_arc_id).unwrap();
         let right_arc = self.arcs.get(&right_arc_id).unwrap();
 
-        circumcircle_of_points(left_arc.origin, middle_arc.origin, right_arc.origin)
+        circumcircle_of_points(left_arc.site.position, middle_arc.site.position, right_arc.site.position)
     }
 
     pub fn find_arc(&self, x: f32, directrix: f32) -> Option<ArcId> {
@@ -266,9 +281,9 @@ impl BeachLine {
         for arc_id in &self.arc_ordering {
             let xl = self.get_left_breakpoint(*arc_id, directrix);
             let xr = self.get_right_breakpoint(*arc_id, directrix);
-            let origin = self.arcs.get(arc_id).unwrap().origin;
+            let arc = self.arcs.get(arc_id).unwrap();
 
-            println!("arc {}: xl={}, xr={}, site={{x:{}, y:{}}}", arc_id.0, xl, xr, origin.x, origin.y);
+            println!("arc {}: xl={}, xr={}, site={{id: {}, x:{}, y:{}}}", arc_id.0, xl, xr, arc.site.id, arc.site.position.x, arc.site.position.y);
         }
     }
 }
@@ -290,17 +305,20 @@ pub struct DiagramBuilder {
 }
 
 impl DiagramBuilder {
-    pub fn new(bounding_rect: Rect, sites: Vec<Point2<f32>>) -> DiagramBuilder {
+    pub fn new(bounding_rect: Rect, sites: Vec<Site>) -> DiagramBuilder {
         let mut event_queue = BinaryHeap::new();
 
         for site in sites {
             let position = Point2::new(
-                (site.x - bounding_rect.position.x) / bounding_rect.size.x,
-                (site.y - bounding_rect.position.y) / bounding_rect.size.y
+                (site.position.x - bounding_rect.position.x) / bounding_rect.size.x,
+                (site.position.y - bounding_rect.position.y) / bounding_rect.size.y
             );
 
             if position.x > 0.0 && position.y > 0.0 && position.x < 1.0 && position.y < 1.0 {
-                event_queue.push(Event::Site(position));
+                event_queue.push(Event::Site(Site {
+                    id: site.id,
+                    position: position,
+                }));
             }
         }
 
@@ -322,9 +340,9 @@ impl DiagramBuilder {
         self.debug = enable;
     }
 
-    fn handle_site_event(&mut self, site: Point2<f32>) {
+    fn handle_site_event(&mut self, site: Site) {
         // Find existing arc directly above this site
-        let current_arc = self.beachline.find_arc(site.x, site.y);
+        let current_arc = self.beachline.find_arc(site.position.x, site.position.y);
 
         // Insert arc for this site
         let new_arc = self.beachline.add_arc(site, current_arc);
@@ -346,7 +364,7 @@ impl DiagramBuilder {
             }
 
             if let Some((centroid, radius)) = self.beachline.get_circumcircle(left_arc) {
-                if centroid.y + radius > site.y {
+                if centroid.y + radius > site.position.y {
                     // Add to event_queue
                     self.event_queue.push(Event::Circle(centroid.y + radius, centroid, left_arc));
 
@@ -367,7 +385,7 @@ impl DiagramBuilder {
             }
 
             if let Some((centroid, radius)) = self.beachline.get_circumcircle(right_arc) {
-                if centroid.y + radius > site.y {
+                if centroid.y + radius > site.position.y {
                     // Add to event_queue
                     self.event_queue.push(Event::Circle(centroid.y + radius, centroid, right_arc));
 
@@ -411,13 +429,13 @@ impl DiagramBuilder {
         let event = self.event_queue.pop();
 
         match event {
-            Some(Event::Site(p)) => {
-                self.handle_site_event(p);
+            Some(Event::Site(site)) => {
+                self.handle_site_event(site);
 
                 if self.debug {
-                    println!("directrix={}", p.y);
-                    println!("site event: x={}, y={}", p.x, p.y);
-                    self.debug_beachline(p.y);
+                    println!("directrix={}", site.position.y);
+                    println!("site event: id={} x={}, y={}", site.id, site.position.x, site.position.y);
+                    self.debug_beachline(site.position.y);
                 }
             }
             Some(Event::Circle(y, centroid, id)) => {
