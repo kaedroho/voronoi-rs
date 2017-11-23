@@ -13,32 +13,70 @@ pub struct Rect {
     pub size: Vector2<f32>,
 }
 
+impl Rect {
+    #[inline]
+    pub fn left(&self) -> f32 {
+        self.position.x
+    }
+
+    #[inline]
+    pub fn top(&self) -> f32 {
+        self.position.y
+    }
+
+    #[inline]
+    pub fn right(&self) -> f32 {
+        self.position.x + self.size.x
+    }
+
+    #[inline]
+    pub fn bottom(&self) -> f32 {
+        self.position.y + self.size.y
+    }
+
+    #[inline]
+    pub fn contains_point(&self, point: Point2<f32>) -> bool {
+        point.x > self.left() && point.y > self.top() && point.x < self.right() && point.y < self.bottom()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SiteId(u32);
+
 #[derive(Debug, Clone, Copy)]
 pub struct Site {
-    pub id: u32,
     pub position: Point2<f32>,
 }
 
 impl Site {
-    pub fn new(id: u32, position: Point2<f32>) -> Site {
+    pub fn new(position: Point2<f32>) -> Site {
         Site {
-            id: id,
             position: position,
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CircleId(u32);
+
+#[derive(Debug, Clone, Copy)]
+struct Circle {
+    pub position: Point2<f32>,
+    pub radius: f32,
+    pub arc: ArcId,
+}
+
 #[derive(Debug)]
 enum Event {
-    Site(Site),
-    Circle(f32, Point2<f32>, ArcId),
+    Site(f32, SiteId),
+    Circle(f32, CircleId),
 }
 
 impl Event {
     fn get_y(&self) -> f32 {
         match *self {
-            Event::Site(site) => site.position.y,
-            Event::Circle(y, ..) => y,
+            Event::Site(y, _) => y,
+            Event::Circle(y, _) => y,
         }
     }
 }
@@ -121,6 +159,19 @@ fn intersection(left_focus: Point2<f32>, right_focus: Point2<f32>, directrix: f3
     Point2::new(x, y)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct EdgeId(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ArcId(u32);
+
+#[derive(Debug)]
+enum BeachLineNode {
+    Inner(Box<BeachLineNode>, Box<BeachLineNode>, EdgeId),
+    Leaf(ArcId, SiteId, Option<CircleId>),
+}
+
+/*
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ArcId(u32);
 
@@ -288,51 +339,39 @@ impl BeachLine {
     }
 }
 
+*/
+
 #[derive(Debug)]
 pub struct DiagramBuilder {
-    diagram: Diagram,
+    sites: Vec<Site>,
+    circles: FnvHashMap<CircleId, Circle>,
     event_queue: BinaryHeap<Event>,
-    beachline: BeachLine,
+    beachline: Option<BeachLineNode>,
     step: u32,
     total_events: u32,
     cancelled_events: u32,
     debug: bool,
-    offset: Point2<f32>,
-    scale: Vector2<f32>,
-
-    /// Keeps track of valid future circle events
-    future_circle_events: FnvHashSet<ArcId>,
 }
 
 impl DiagramBuilder {
     pub fn new(bounding_rect: Rect, sites: Vec<Site>) -> DiagramBuilder {
         let mut event_queue = BinaryHeap::new();
 
-        for site in sites {
-            let position = Point2::new(
-                (site.position.x - bounding_rect.position.x) / bounding_rect.size.x,
-                (site.position.y - bounding_rect.position.y) / bounding_rect.size.y
-            );
-
-            if position.x > 0.0 && position.y > 0.0 && position.x < 1.0 && position.y < 1.0 {
-                event_queue.push(Event::Site(Site {
-                    id: site.id,
-                    position: position,
-                }));
+        for (site_id, site) in sites.iter().enumerate() {
+            if bounding_rect.contains_point(site.position) {
+                event_queue.push(Event::Site(site.position.y, SiteId(site_id as u32)));
             }
         }
 
         DiagramBuilder {
-            diagram: Diagram::default(),
-            beachline: BeachLine::default(),
+            sites: sites,
+            circles: FnvHashMap::default(),
+            beachline: None,
             step: 0,
             total_events: 0,
             cancelled_events: 0,
             debug: false,
             event_queue: event_queue,
-            future_circle_events: FnvHashSet::default(),
-            offset: bounding_rect.position,
-            scale: 1.0 / bounding_rect.size,
         }
     }
 
@@ -341,6 +380,7 @@ impl DiagramBuilder {
     }
 
     fn handle_site_event(&mut self, site: Site) {
+/*
         // Find existing arc directly above this site
         let current_arc = self.beachline.find_arc(site.position.x, site.position.y);
 
@@ -397,9 +437,11 @@ impl DiagramBuilder {
                 }
             }
         }
+*/
     }
 
-    fn handle_circle_event(&mut self, y: f32, centroid: Point2<f32>, arc: ArcId) {
+    fn handle_circle_event(&mut self, circle: Circle) {
+/*
         // Add vertex into diagram
         self.diagram.vertices.push(
             Vertex {
@@ -413,10 +455,11 @@ impl DiagramBuilder {
 
         // Remove the arc
         self.beachline.remove_arc(arc);
+*/
     }
 
     fn debug_beachline(&self, directrix: f32) {
-        self.beachline.debug(directrix);
+        //self.beachline.debug(directrix);
     }
 
     pub fn step(&mut self) -> bool {
@@ -429,23 +472,24 @@ impl DiagramBuilder {
         let event = self.event_queue.pop();
 
         match event {
-            Some(Event::Site(site)) => {
+            Some(Event::Site(y, site_id)) => {
+                let site = self.sites[site_id.0 as usize];
                 self.handle_site_event(site);
 
                 if self.debug {
                     println!("directrix={}", site.position.y);
-                    println!("site event: id={} x={}, y={}", site.id, site.position.x, site.position.y);
+                    println!("site event: id={} x={}, y={}", site_id.0, site.position.x, site.position.y);
                     self.debug_beachline(site.position.y);
                 }
             }
-            Some(Event::Circle(y, centroid, id)) => {
+            Some(Event::Circle(y, circle_id)) => {
                 // Only run handle_circle_event if the ID is still in future_circle_events
-                if self.future_circle_events.remove(&id) {
-                    self.handle_circle_event(y, centroid, id);
+                if let Some(circle) = self.circles.remove(&circle_id) {
+                    self.handle_circle_event(circle);
 
                     if self.debug {
                         println!("directrix={}", y);
-                        println!("circle event: arc={}, cx={}, cy={}", id.0, centroid.x, centroid.y);
+                        println!("circle event: id={}, cx={}, cy={}", circle_id.0, circle.position.x, circle.position.y);
                         self.debug_beachline(y);
                     }
                 } else {
@@ -470,6 +514,6 @@ impl DiagramBuilder {
 
     pub fn finish(mut self) -> Diagram {
         while !self.step() {}
-        self.diagram
+        Diagram::default()
     }
 }
